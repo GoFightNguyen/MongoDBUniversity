@@ -159,3 +159,6 @@ upsert is an argument to pass to `updateOne()` and `updateMany()`
 ## Deleting Documents
 `deleteOne()`
 `deleteMany()`
+
+# Chapter 3 Deeper Dive on the MongoDB Query Language
+Best thing is to refer to the documentation.
