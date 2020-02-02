@@ -268,7 +268,7 @@ Accumulator Expressions in $project operate over an array in the current documen
 
 For all films that won at least 1 Oscar, calculate the std deviation, highest, lowest, and average imdb.rating.
 Use the sample std deviation expression.
-All movies winning an Oscar begen with a string resemblings one of the following in their awards field: `Won 13 Oscars` or `Won 1 Oscar`
+All movies winning an Oscar begin with a string resemblings one of the following in their awards field: `Won 13 Oscars` or `Won 1 Oscar`
 ```js
 db.movies.aggregate([
   {
@@ -526,4 +526,150 @@ db.air_alliances.aggregate([{
 { $match: { isValid: true } },
 { $group: { _id: "$connections.dst_airport" } }
 ])
+```
+
+# Chapter 4: Core Aggregation - Multidimensional Grouping
+Facet Navigation enables devs to create an interface characterizing query results across multiple dimensions (facets).
+
+Faceting is an analytics capability allowing users to explore data by applying multiple filters and characterizations.
+
+## Single Facet Query
+```js
+db.companies.aggregate([
+  {$match: {'$text': {'$search': 'network'}}},
+  // create a facet by category
+  {$sortByCount: '$category_code'}
+])
+```
+$sortByCount outputs documents with two fields:
+- `_id` the value the facet is for
+- `count` number of documents matching that value
+It works just like a $group stage followed immediately by a $sort (in descending) stage.
+
+## $bucket
+bucketing is for grouping data by ranges of values.
+
+```js
+$bucket: {
+  groupBy: <expression>,
+  boundaries: [<lowerBound1>, <lowerbound2>,...],
+  default: <literal>,
+  output: {
+    <output1>: {<$accumulator_expression>},
+    ...
+    <outputN:>: {<$accumulator_expression>}
+  }
+}
+
+db.movies.aggregate([
+  {
+    $bucket: {
+      groupBy: "$imdb.rating",
+      boundaries: [0,5,8,Infinity],
+      default: "not rated",
+      output: {
+        average_per_bucket: {$avg: "$imdb.rating"},
+        count: {$sum: 1}
+      }
+    }
+  }
+])
+```
+
+$bucket:
+- groupBy - must evaulate down to a single expression, even if operating on multiple fields
+- boudnaries - each value is the lower bound for the group the document will be placed in
+  - values must be of the same type, but you can mix types of numbers
+  - must be at least two boundary values
+  - ex: [0,5,8,Infinity] the first grouping is [0,5)
+- default - optional, but important
+  - If the groupBy field is not set on the document, this value will be used
+  - If you do not set this and a document is missing the field, then it will crashy your query
+- output - `count` is the default, but removed when output is specified
+  - the default output of bucket is
+    - `_id` - the boundary (including default) grouping
+    - `count` - how many documents were in that boundary
+
+## $bucketAuto
+```js
+db.movies.aggregate([
+  {
+    $match: {"imdb.rating": {$gte: 0}}
+  },
+  {
+    $bucketAuto: {
+      groupBy: "$imdb.rating",
+      buckets: 4
+    }
+  }
+])
+```
+
+similar to $bucket, but key differences:
+- buckets - instead of defining boundares, let MongoDB figure them out by specifying how many buckets we want
+  - might not get as many buckets back as you specify, especially if
+    - there are less documents than buckets specified
+    - there are less unique values than buckets specified
+- granularity - optional. Attempts to place boundaries along the preferred number series (look at the documentation for types of number series)
+  - Setting this means your `groupBy` must be numeric
+
+## multiple facets
+$facet allows several sub-pipelines to be executed to produce multiple facets.
+It allows the application to generate several different facets with one single database request.
+Each entry in $facet is completely independent from the others.
+Thus, the output of one cannot be used by another.
+For example, the output of Categories cannot be used by Employees
+```js
+db.companies.aggregate([
+  {$match: {"$text": {$search: "Databases"}}},
+  {
+    $facet: {
+      // facet 1
+      Categories: [{$sortByCount: "$category_code"}],
+      // facet 2
+      Employees: [
+        {$match: {"founded_year": {$gt: 1980}}},
+        {$bucket: {
+          groupBy: "$number_of_employees",
+          boundaries: [0,20,50,100,500,1000,Infinity],
+          default: "Other"
+        }}
+      ]
+    }
+  }
+])
+```
+
+## lab
+How many movies are in both the top ten highest rated movies according to the imdb.rating and the metacritic fields?
+```js
+db.movies.aggregate([
+  {
+    $match: {
+      metacritic: {$gte: 0},
+      "imdb.rating": {$gte: 0}
+    }
+  },
+  {
+    $facet: {
+      TopTenMetacritic : [
+        { $sort: { metacritic: -1, title: 1}},
+        { $limit: 10},
+        { $project: {_id: 0, title: 1}}
+      ],
+      TopTenImdb: [
+        { $sort: { "imdb.rating": -1, title: 1}},
+        { $limit: 10},
+        { $project: {_id: 0, title: 1}}
+      ]
+    }
+  },
+  {
+    $project: {
+      movies_in_both: {
+        $setIntersection: ["$TopTenMetacritic", "$TopTenImdb"]
+      }
+    }
+  }
+]).pretty()
 ```
