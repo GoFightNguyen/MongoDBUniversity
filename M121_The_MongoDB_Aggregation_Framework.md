@@ -421,3 +421,109 @@ db.air_routes.aggregate([
   }
 ])
 ```
+
+## $graphLookup
+Allows looking up recursively, a set of documents with a defined relationship to a starting document.
+This provides graph or graph-like capablitites.
+It also provides MongoDB a transitive closure implementation.
+```js
+$graphLookup: {
+  from: <lookup_table>,
+  startWith: <expression_for_value_to_start_from>,
+  connectFromField: <field_name_to_connect_from>,
+  connectToField: <field_name_to_connect_to>,
+  as: <field_name_for_result_array>,
+  maxDepth: <max_number_of_iterations_to_perform__0_means_1>,
+  depthField: <field_name_for_number_of_iterations_to_reach_this_node__this_is_0_for_first_lookup>,
+  restrictSearchWithMatch: <match_condition_to_apply_to_lookup>
+}
+```
+
+```js
+// Who all reports to Eliot, indirectly or directly?
+db.parent_reference.aggregate([
+  {
+    $match: {name: 'Eliot'}
+  },
+  {
+    $graphLookup: {
+      from: "parent_reference",
+      startWith: "$_id",
+      connectFromField: "_id",
+      connectToField: "reports_to",
+      as: "all_reports"
+    }
+  }
+])
+```
+
+### $graphLookup: cross-collection lookup
+```js
+use air
+
+db.airlines.aggregate([
+  {
+    $match: {name: "TAP Portugal"}
+  },
+  {
+    $graphLookup: {
+      from: "routes",  //other collection. cannot be sharded
+      as: "chain",
+      startWith: "$base",
+      connectFromField: "dst_airport",
+      connectToField: "src_airport",
+      restrictSearchWithMatch: { "airline.name": "TAP Portugal"},
+      maxDepth: 1 //only restricts the number of recursive lookups on the from collection when doing a cross-collection lookup. For this example, it translates to at most 1 layover
+    }
+  }
+]).pretty()
+```
+
+Find all possible distinct destinations
+- with at most one layover
+- departing from the base airports of airlines that are part of the "OneWorld" alliance
+- airlines are national carriers from Germany, Spain, or Canada
+Include both the destination and which airline services that location.
+We will need the air_airlines, air_alliances, and air_routes collections in the aggregations db.
+```js
+db.air_alliances.aggregate([{
+  $match: { name: "OneWorld" }
+}, {
+  $graphLookup: {
+    startWith: "$airlines",
+    from: "air_airlines",
+    connectFromField: "name",
+    connectToField: "name",
+    as: "airlines",
+    maxDepth: 0,
+    restrictSearchWithMatch: {
+      country: { $in: ["Germany", "Spain", "Canada"] }
+    }
+  }
+}, {
+  $graphLookup: {
+    startWith: "$airlines.base",
+    from: "air_routes",
+    connectFromField: "dst_airport",
+    connectToField: "src_airport",
+    as: "connections",
+    maxDepth: 1
+  }
+}, {
+  $project: {
+    validAirlines: "$airlines.name",
+    "connections.dst_airport": 1,
+    "connections.airline.name": 1
+  }
+},
+{ $unwind: "$connections" },
+{
+  $project: {
+    isValid: { $in: ["$connections.airline.name", "$validAirlines"] },
+    "connections.dst_airport": 1
+  }
+},
+{ $match: { isValid: true } },
+{ $group: { _id: "$connections.dst_airport" } }
+])
+```
