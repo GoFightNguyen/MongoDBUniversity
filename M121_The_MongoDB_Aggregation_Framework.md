@@ -673,3 +673,151 @@ db.movies.aggregate([
   }
 ]).pretty()
 ```
+
+# Chapter 5: Miscellaneous Aggregation
+## $redact
+One way to implement access control in regards to what fields are returned.
+It is __not__ for restricting access to a collection.
+
+`$redact: <expression>`
+The expression must resolve to one of three values:
+- $$DESCEND - retains the current level and evaluates the next level down.
+If referring to a field in the document, then every level __must__ include that field, otherwise you must specify what to do.
+- $$PRUNE - remove; excludes all fields at the current document level without further inspection.
+In other words, $$PRUNE automatically applies to lower levels
+- $$KEEP - retain; include all fields at the current document level without further inspection.
+In other words, automatically applies to lower levels.
+
+```js
+db.employees.aggregate([
+  {
+    $redact: {$cond: [{$in: ["Management", "$acl"]}, "$$DESCEND", "$$PRUNE"]}
+  }
+]).pretty()
+```
+This example does:
+- look at current level
+- If the acl field contains Management, then $$DESCEND is followed.
+- Otherwise, $$PRUNE is followed.
+- If it was $$DESCEND, then it will keep traversing down, and keeping, until a $$PRUNE occurs
+
+## $out
+Useful for persisting the results of an aggregation.
+`$out: "output_collection"`
+
+Must be the last stage in a pipeline.
+This implies it cannot be used within a $facet.
+
+MongoDB creates the collection if it does not exist, otherwise override the existing one.
+The collection must/will exist in the same db.
+If overriding an existing collection, the existing indexes will still be in place.
+
+## Views
+MongoDB enables non-materialized views, meaning they are computed every time a read operation is performed against that view.
+Useful:
+- to create vertical/horizontal slices of a collection
+  - vertical: occurs through $project and other stages changing the shape of the document(s) being returned. It does not change the number of document being returned.
+  - horizontal: occurs through $match stages. It changes the number of document(s) returned, but not the shape.
+
+Views can be created 2 ways:
+- db.createView(<view>, <source>, <pipeline>, <collation>)
+- db.createCollection(<name>, <options>)
+
+```js
+db.createView("bronze_banking", "customers", [
+  {
+    $match: {accountType: "bronze"}
+  },
+  {
+    $project: {
+      _id: 0,
+      name: "$name.first",
+      account_ending: {$substr: ["$accountNumber", 7, -1]}
+    }
+  }
+])
+```
+
+View restrictions:
+- no write operations
+- no index operations
+- no renaming
+- no $text
+- no geoNear or $geoNear
+- find() operations with projection operators are not permitted
+- there's more
+
+Views are public.
+So avoid sensitive data in them.
+
+# Chapter 6: Aggregation Pipeline Performance
+Two high-level categories of aggregation queries:
+- "realtime" processing
+  - provide data for applications
+  - thus, performance is more important
+- batch processing
+  - provide data for analytics
+  - run periodically
+  - performance is less important
+
+## Index Usage
+Some aggregation operators can use indexes, while others cannot.
+When executing the pipeline, as soon as server encounters a stage unable to use indexes, none of the following stages will be able to either.
+The Query Optimizer tries to detect when a stage can be moved forward so indexes can be utilized.
+
+Pass `{explain: true}` to the aggregate function to get the details on the aggregation.
+
+Try to have $match, $limit, and $sort as close to the beginning as possible since all these stages can use indexes.
+
+## Memory Constraints
+Results are subject to a 16MB document limit.
+100MB of RAM per stage.
+`{allowDiskUsage: true}` does not work with $graphLookup since $graphLookup does not support spilling to disk.
+
+## Aggregation Pipeline on a Sharded Cluster
+Some operators, such as $out and $lookup, will cause a merge stage on the primary shard for a database.
+
+## Pipeline Optimization
+Avoid unnecessary stages, the Aggregation Framework can project fields automatically if final shape of the output document can be determined from initial input.
+
+Use accumulator expressions $map, $reduce, $filter in project before an $unwind, if possible.
+
+Every high order array function can be implemented with $reduce if the provided expressions do not meet your needs.
+
+
+# Final
+Which alliance has the most unique airlines operating between the airports JFK and LHR, in either directions?
+```js
+db.air_routes.aggregate([
+  {
+    $match: {
+        src_airport: {$in: ["JFK","LHR"]},
+        dst_airport: {$in: ["JFK","LHR"]}
+    }
+  },
+  {
+    $lookup: {
+      from: "air_alliances",
+      localField: "airline.name",
+      foreignField: "airlines",
+      as: "alliance"
+    }
+  },
+  {
+    $match: {alliance: {$ne: []}}
+  },
+  {
+    $project: {
+      _id: 0,
+      airlineName: "$airline.name",
+      allianceName: { $arrayElemAt: ["$alliance.name", 0] }
+    }
+  },
+  {
+    $group: {
+      _id: "$allianceName",
+      airlines: {$addToSet: "$airlineName"}
+    }
+  }
+]).pretty()
+```
