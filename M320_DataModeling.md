@@ -49,3 +49,28 @@ Patterns
 | Transformation Patterns | Pattern A | Patterns A,B | Patterns A,B,C |
 
 # Chapter 2: Relationships
+## Type and Cardinality
+One way to discuss cardinality is [min,likely,max].
+
+## One-to-Many Representations
+In general, when embedding, embed in the side most often queried.
+
+- Embed in the "one" side
+  - the documents from the "many" side are embedded
+  - most common representation for simple applications or when there are few documents to embed
+  - need to process main object and the N related documents together (think a movie and its top 20 reviews)
+  - indexing is done on the array
+- Embed in the "many" side
+  - less often used
+  - useful if "many" side is queried more ofen than the "one" side
+  - embbeded object is duplicated (this can be a downside)
+    - duplication may be preferable for dynamic objects (think of orders and the address it is shipped to)
+- reference in the "one" side
+  - array of references
+  - allows for large documents and a high count of these
+  - list of references available when retrieving the main object
+  - cascade deletes are not supported by MongoDB and must be managed by the application
+- reference in the "many" side
+  - preferred representation using references
+  - allows for large documents and a high count of these
+  - no need to manage the references on the "one" side
