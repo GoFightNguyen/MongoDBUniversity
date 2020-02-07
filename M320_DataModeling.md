@@ -100,3 +100,8 @@ In general, when embedding, embed in the side most often queried.
 ## One-to-Zillions
 - Reference in the many/zillions side
   - quantify the relationship to understand the maximum N value
+
+# Chapter 3: Patterns (Part 1)
+Patterns are small, reusable units of knowledge to apply.
+We will look at patterns for Data Modeling and Schema Design.
+
