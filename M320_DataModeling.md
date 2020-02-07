@@ -105,3 +105,80 @@ In general, when embedding, embed in the side most often queried.
 Patterns are small, reusable units of knowledge to apply.
 We will look at patterns for Data Modeling and Schema Design.
 
+## Handling Duplication, Staleness and Integrity
+Applying patterns may lead to:
+1. duplication - duplicating data across documents
+2. data staleness - accepting staleness in some pieces of data
+3. data integrity issues - writing extra application side logic to ensure referential integrity
+
+## Attribute Pattern
+** The Wildcard Index functionality can replace some use cases of the Attribute Pattern **
+
+Problem:
+- lots of similar fields
+- want to search across many fields at once
+- fields present in only a small subset of documents
+
+Solution:
+- transform those fields from field/value form to an array of subdocuments where each subdocument is a key/value pair
+
+Use case examples:
+- characteristics of a product
+- set of fields all having the same value type
+
+Pros & Cons:
+- easier to index
+  - Create an index on the keys
+  - Create an index on the values
+- allow for non-deterministic field names
+- ability to qualify the relationship of the original field and value
+
+## Extended Reference Pattern
+Likely seen in a many-to-one relationship.
+
+Problem:
+- too many repetitive joins
+
+Solution:
+- identify fields on the lookup side
+- bring those fields into the main object
+- choose fields that do not change often
+- choose only the fields you need to avoid joins ($lookup, $graphLookup)
+
+Use case examples:
+- catalog
+- mobile apps
+- real-time analytics
+
+Pros & Cons:
+- faster reads
+- reduce number of joins and lookups
+- may introduce lots of duplication if extended reference contains fields that mutate a lot
+
+## Subset Pattern
+The following could help when the working set is too large:
+- add RAM
+- scale with sharding
+- reduce the size of the working set (that's what this pattern is about)
+
+Problem:
+- working set is too big
+- lot of pages are evicted from memory
+- a large part of the documents are rarely needed
+
+Solution:
+- split the collection into 2 collections
+  - most used part of documents
+  - least used part of documents
+- duplicate part of a 1-to-many or many-to-many relationship that is often used in the most used side
+
+Use case examples:
+- list of reviews for a product
+- list of comments on an article
+- list of actors in a movie
+
+Pros and Cons:
+- smaller working set, as often used documents are smaller
+- shorter disk access for bringing in additional documents from the most used collection
+- more round trips to the server
+- a little more space used on disk
