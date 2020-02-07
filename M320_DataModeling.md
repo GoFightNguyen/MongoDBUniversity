@@ -74,3 +74,29 @@ In general, when embedding, embed in the side most often queried.
   - preferred representation using references
   - allows for large documents and a high count of these
   - no need to manage the references on the "one" side
+
+## Many-to-Many Relationship
+- embed in the main side
+  - the documents from the less queried side are embedded
+  - results in duplication
+  - keep "source" for the embedded documents in another collection
+  - indexing is done on the array
+- reference in the main side
+  - array of references to the documents of the other collection
+  - references readily available upon first query on the "main" collection
+- references in the secondary side
+  - array of references to the documents of the other collection
+  - needs a secondary query to get more information
+
+## One-to-One
+- embed fields at the same level (same document)
+- embed using subdocuments (preferred representation)
+  - documents are clearer
+  - preserved simplicity
+- reference
+  - adds complexity, so only do for schema optimization scenarios
+  - useful when you do not care about the other info as often
+
+## One-to-Zillions
+- Reference in the many/zillions side
+  - quantify the relationship to understand the maximum N value
