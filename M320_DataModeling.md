@@ -182,3 +182,55 @@ Pros and Cons:
 - shorter disk access for bringing in additional documents from the most used collection
 - more round trips to the server
 - a little more space used on disk
+
+## Computed Pattern
+Mathematical Operations.
+Fan Out Operations - many tasks to represent one logical task.
+Roll Up Operations - merging data together, looking at data at a high-level.
+
+Problem:
+- costly computation or manipulation of data
+  - overuse of resources, like CPU
+- executed frequently on the same data, producing the same result
+- need to reduce latency for read operations
+
+Solution:
+- perform the operation and store the result in the appropriate document and collection
+- if need to redo the operations, keep the source of them
+
+Use case examples:
+- IoT
+- Event Sourcing
+- Time Series Data
+- Frequent Aggregation Framework queries
+
+Pros & Cons:
+- read queries are faster
+- saving on resources like CPU and Disk
+- may be difficult to identity the need
+- avoid applying or overusing it unless needed
+
+## Bucket Pattern
+Problem:
+- avoiding too many documents, or too big documents
+- a 1-to-many relationship that can't be embedded
+
+Solution:
+- define the optimal amount of information to group together
+- create arrays to store the information in the main object
+- it is basically an embedded 1-to-many relationship, where you get n documents each having an average of many/n subdocuments
+
+Use Case Examples:
+- IoT
+- Data Warehouse
+- lots of info associated to one object
+
+Pros & Cons:
+- good balance between number of data access and size of data returned
+- makes data more manageable
+- easy to prune data
+- can lead to poor query results if not designed correctly
+- difficult to sort across buckets
+- ad hoc queries may be more complex, again across buckets
+- works best when the "complexity" (the storage pattern) is hidden through the application code
+- not great if you need to do random/specific insertions/deletions in buckets
