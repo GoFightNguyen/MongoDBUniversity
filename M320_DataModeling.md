@@ -183,6 +183,8 @@ Pros and Cons:
 - more round trips to the server
 - a little more space used on disk
 
+# Chapter 4: Patterns (Part 2)
+
 ## Computed Pattern
 Mathematical Operations.
 Fan Out Operations - many tasks to represent one logical task.
@@ -234,3 +236,135 @@ Pros & Cons:
 - ad hoc queries may be more complex, again across buckets
 - works best when the "complexity" (the storage pattern) is hidden through the application code
 - not great if you need to do random/specific insertions/deletions in buckets
+
+## Schema Versioning
+Each document indicates its schema version.
+Problem:
+- avoid downtime while doing schema upgrades
+- upgrading all documents can take hours, days or even weeks when dealing with big data
+- don't want to update all documents
+
+Solution:
+- each document gets a "schema_version" field
+- application can handle all versions
+- choose your strategy to migrate the documents
+
+Use Case Examples:
+- every application using a database
+- system with a lot of legacy data
+
+Pros & Cons:
+- no downtime
+- feel in control of the migration
+- less future tech debt
+
+## Tree Patterns
+There are four patterns:
+- Parent References - the document holds a reference to the parent node
+- Child References - the parent documents contains an array of all immediate children
+- Array of Ancestors - an ordered array storing all of a node's ancestors
+- Materialized Paths - a string value describes the nodes ancestors with some value separator
+  - similar to array of ancestors, but allows a single field path index on the ancestors
+
+In the following table, let:
+- Y indicate the pattern supports the query
+- ~ denote it is possible, however, it may take more work in the application code, such as the use of multiple queries
+
+| Pattern Name | Who are the ancestors of node X? | Who reports to Y ? | Find all nodes under Z | Change all categories under N to Under P |
+| --- | --- | --- | --- | --- |
+| Parent References | ~ | Y | ~ | Y |
+| Child References | ~ | ~ | Y | ~ |
+| Array of Ancestors | Y | Y | Y | ~ |
+| Materialized Paths | Y | ~ | ~ | ~ |
+
+Problem:
+- representation of hierarchical structured data
+- different access patterns to navigate the tree
+- provide optimized model for common operations
+
+Solution:
+- the different patterns are all listed above
+
+Use Case Example:
+- org charts
+- product categories
+
+Pros & Cons:
+- Look at the table above
+
+## Polymorphic Pattern
+Problem:
+- objects are more similar than different
+- want to keep objects in same collection
+
+Solution:
+- field tracks the type of document or sub-document
+- app has different code paths per document type, or has subclasses
+
+Use Case Example:
+- single view implementation
+- product catalog
+- content management
+
+Pros & Cons:
+- easier to implement
+- allow to query across a single collection
+
+## Approximation Pattern
+Used to reduce the nubmer of resources needed to perform some write operations.
+Uses an approximation to produce a result.
+For example, an app wanting to track page views.
+Instead of writing to the database for every page view, do it every 10 views.
+
+Problem:
+- data is expensive to calculate
+- it does not matter if the nubmer is precise
+
+Solution:
+- fewer writes, but with higher payload (not larger payload)
+
+Use Case Examples:
+- web page counters
+- any counters with tolerance to imprecision
+- metric statistics
+
+Pros & Cons:
+- less writes
+- less contention on documents
+- statistically valid numbers
+- numbers are not exact
+- must be implemented in the application
+
+## Outlier Pattern
+Problem:
+- few documents would drive the solution
+- impact would be negative on the majority of queries
+
+Solution:
+- implementation that works for the majority
+- field identifies outliers as exception
+- outliers are handled differently on the app side
+
+Use Case Examples:
+- social networks
+- popularity
+
+Pros & Cons:
+- optimized solution for most use cases
+- differences handled application side
+- difficult for aggregation or ad hoc queries
+
+## Summary of all patterns
+| | Catalog | Content Management | IoT | Mobile | Personalization | Real-Time Analytics | Single View |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Approximation | Y | | Y | Y | | Y | |
+| Attribute | Y | Y | | | | | Y |
+| Bucket | | | Y | | | Y | |
+| Computed | Y | | Y | Y | Y | Y | Y |
+| Extended Reference | Y | | | Y | | Y | |
+| Outlier | | | Y | Y | Y | | |
+| Preallocated | | | Y | | | Y | |
+| Polymorphic | Y | Y | | Y | | | Y |
+| Schema Versioning | Y | Y | Y | Y | Y | Y | Y |
+| Subset | Y | Y | | Y | Y | | |
+| Tree and Graph | Y | Y | | | | | |
