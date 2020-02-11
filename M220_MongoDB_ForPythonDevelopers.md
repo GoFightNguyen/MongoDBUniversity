@@ -102,3 +102,7 @@ facet_stage = {
         }
     }
 ```
+
+## Basic Writes
+`insert_one()` returns an `InsertOneResult`, which contains the _id of an inserted document and whether the operation was ack'd by the server.
+Perform an upsert by using `update_one()` and set `upsert=True`.
