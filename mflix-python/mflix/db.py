@@ -153,6 +153,9 @@ def get_movies_faceted(filters, page, movies_per_page):
     # TODO: Faceted Search
     # Add the necessary stages to the pipeline variable in the correct order.
     # pipeline.extend(...)
+    pipeline.append(skip_stage)
+    pipeline.append(limit_stage)
+    pipeline.append(facet_stage)
 
     try:
         movies = list(db.movies.aggregate(pipeline, allowDiskUse=True))[0]
@@ -235,7 +238,7 @@ def get_movies(filters, page, movies_per_page):
 
     # TODO: Paging
     # Use the cursor to only return the movies that belong on the current page.
-    movies = cursor.limit(movies_per_page)
+    movies = cursor.skip(page * movies_per_page).limit(movies_per_page)
 
     return (list(movies), total_num_movies)
 
