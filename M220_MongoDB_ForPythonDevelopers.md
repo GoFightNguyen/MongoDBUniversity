@@ -106,3 +106,24 @@ facet_stage = {
 ## Basic Writes
 `insert_one()` returns an `InsertOneResult`, which contains the _id of an inserted document and whether the operation was ack'd by the server.
 Perform an upsert by using `update_one()` and set `upsert=True`.
+
+## Write Concerns
+`writeConcern: {w:1}`
+- only requests an acknowledgement that one node applied the write
+- this is the default `writeConcern` in MongoDB
+- the one indicates the number of nodes that must apply the write before the client recieves an ack
+  - the primary sends an ack after it writes, even before the write is replicated to the secondary nodes.
+
+`writeConcern: {w: 'majority'}`
+- requests ack that a majority of nodes in the replica set applied the write
+- takes longer than w:1
+  - although there is a replication lag, there is no additional load on the server; thus, the primary can still perform the same number of writes/sec
+- is more durable than w:1
+  - useful for ensuring vital writes are majority-committed; even if the primary fails over, the data will not be lost
+
+`writeConcern: {w:0}`
+- does not request an ack that any nodes applied the write
+  - think "fire-and-forget"
+- fastest `writeConcern` level
+- least durable `writeConcern`
+- can still alert the client of network/socket exceptions
