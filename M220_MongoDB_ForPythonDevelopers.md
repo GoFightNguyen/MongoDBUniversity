@@ -241,3 +241,45 @@ db.stock.bulkWrite([
     { updateOne: {'filter': {'item': 'apple'}, 'update': {'$inc': {'quantity': -1}}}}
 ])
 ```
+
+# Chapter 4: Resiliency
+## Robust Client Configuration
+- always use connection pooling
+  - default size is 100
+- always specify a `wtimeout` (write timeout) with majority writes (write concern)
+  - `{w: 'majority', wtimeout: 5000}`
+- always configure for and handle `serverSelectionTimeout` errors
+  - by default, the driver waits 30 secs before raising the error
+
+## Writes with Error Handling
+- `DuplicateKeyError` can occur on _id as well as fields in unique indexes
+
+## Principle of Least Privilege
+> Every program and every privileged user of the system should operate using the least amount of privelege necessary to complete the job
+>
+> <cite>Jerome Saltzer, Communications of the ACM</cite>
+
+Create a db user specifically for the application.
+Consider what kinds of users and what permissions they will have.
+
+## Change Streams
+Useful for tracking real-time data changes to the data used by the application.
+Change streams
+- report changes at the collection level
+- accepts pipelines to transform change events
+  - otherwise, the default is to report any change
+- returns a cursor so you can iterate over it
+
+```python
+low_quantity_pipeline = [ {'$match': {'fullDocument.quantity': {'$lt': 20}}}]
+
+try:
+    with inventory.watch(pipeline=low_quantity_pipeline, full_document='updateLookup') as change_stream_cursor:
+        for data_change in change_stream_cursor:
+            current_quantity = data_change['fullDocument'].get('quantity')
+            fruit = data_change['fullDocument'].get('type')
+            msg = 'There are only {0} units left of {1}'.format(current_quantity, fruit)
+            print(msg)
+except pymongo.errors.PyMongoError:
+    logging.error('change stream closed because of an error.')
+```
