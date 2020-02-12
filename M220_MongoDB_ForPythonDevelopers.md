@@ -189,3 +189,55 @@ pipeline = [
 `delete_one` will delete the first document matching the supplied predicate.
 `delete many` will delete all documents matching the supplied predicate.
 The number of documents deleted can be accessed via the `deleted_count` property on the `DeleteResult` object returned from a delete operation.
+
+# Chapter 3: Admin Backend
+## Read Concerns
+Similar to write concerns, it is about how many nodes are involved in a read operation.
+Read concerns
+- represent different levels of "read isolation"
+- can be used to specify a consistent view of the database
+
+`readConcern: local`
+- default
+- reads from the primary node only, regardless of whether it has been written to secondary nodes
+
+`readConcern: majority`
+- reads whatever the majority of the nodes say
+- for reading mission-critical data
+- more durable reads
+
+```python
+# Return the 20 users who have commented the most on MFlix.
+pipeline = [
+    {
+        '$group': {
+            '_id': '$email',
+            'count': {'$sum': 1}
+        }
+    },
+    { '$limit': 20}
+]
+
+rc = ReadConcern(level='majority')
+comments = db.comments.with_options(read_concern=rc)
+result = comments.aggregate(pipeline)
+```
+
+## Bulk Writes
+Bulk Writes returns a single ack for the entire batch.
+The default behavior is an in-order-execution of the provided writes.
+Any failure stops the execution of the rest of the batch.
+
+If order does not matter, pass `{ordered: false}`.
+The writes will be written in parallel.
+A failure will not stop the execution of other writes.
+
+In a sharded collection, ordered bulk writes take a little longer because write operations have to be routed to the designated shard.
+An unordered bulk write has to be serialized across each designated shard.
+
+```python
+db.stock.bulkWrite([
+    { updateOne: {'filter': {'item': 'apple'}, 'update': {'$inc': {'quantity': 2}}}},
+    { updateOne: {'filter': {'item': 'apple'}, 'update': {'$inc': {'quantity': -1}}}}
+])
+```
