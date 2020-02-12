@@ -127,3 +127,65 @@ Perform an upsert by using `update_one()` and set `upsert=True`.
 - fastest `writeConcern` level
 - least durable `writeConcern`
 - can still alert the client of network/socket exceptions
+
+```python
+db.users.with_options(
+    write_concern=WriteConcern(w='majority')
+).insert_one({
+    "name": name,
+    "email": email,
+    "password": hashedpw
+})
+```
+
+## Basic Updates
+Two idiomatic update operations
+- `update_one`
+- `update_many`
+Update operations return an `UpdateResult`
+- acknowledged, matched_count, modified_count, and upserted_id
+- modified_count and matched_count will be 0 in the case of an upsert
+
+## Basic Joins
+https://docs.mongodb.com/manual/reference/operator/aggregation/lookup/
+
+```python
+# creating a pipeline going from movies to comments
+pipeline = [
+    {
+        "$match": {
+            "_id": ObjectId(id)
+        }
+    },
+    {
+        "$lookup": {
+            'from': 'comments',
+            'let': { 'id_of_the_movie': '$_id'},    # store the movie._id in the $$id_of_the_movie variable, otherwise pipeline cannot access it
+            'pipeline': [
+                {
+                    # $movie_id is the reference key in comments
+                    '$match': { '$expr': {'$eq': ['$$id_of_the_movie', '$movie_id']}}
+                },
+                {
+                    '$sort': {'date': DESCENDING}
+                }
+            ],
+            'as': 'comments'
+        }
+    }
+    # if we didn't need to sort, then this simple approach would have worked
+    # {
+    #     '$lookup': {
+    #         'from': 'comments',
+    #         'localField': '_id',
+    #         'foreignField': 'movie_id',
+    #         'as': 'comments'
+    #     }
+    # }
+]
+```
+
+## Basic Deletes
+`delete_one` will delete the first document matching the supplied predicate.
+`delete many` will delete all documents matching the supplied predicate.
+The number of documents deleted can be accessed via the `deleted_count` property on the `DeleteResult` object returned from a delete operation.
