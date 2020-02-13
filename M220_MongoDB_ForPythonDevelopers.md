@@ -246,8 +246,10 @@ db.stock.bulkWrite([
 ## Robust Client Configuration
 - always use connection pooling
   - default size is 100
+  - in `MongoClient()` pass `maxPoolSize=50`
 - always specify a `wtimeout` (write timeout) with majority writes (write concern)
   - `{w: 'majority', wtimeout: 5000}`
+  - in `MongoClient()` pass `wtimeout=2500`
 - always configure for and handle `serverSelectionTimeout` errors
   - by default, the driver waits 30 secs before raising the error
 
