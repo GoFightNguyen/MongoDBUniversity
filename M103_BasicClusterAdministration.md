@@ -44,3 +44,35 @@ To configure the `mongod` (there are more than we list here, `mongod help`):
   - outputs the process id
 
 Another way to find the pid of the mongod process: `ps -ef | grep mongod`
+
+## Configuration File
+The MongoDB configuration file is a way to organize the options you want when running the mongod process.
+It is a YAML file.
+
+[mongod config file options](https://docs.mongodb.com/manual/reference/configuration-options/)
+
+`mongod --config "/etc/mongod.conf"` or `mongod -f "/etc/mongod.conf"`
+
+```yaml
+storage:
+    dbPath: "/data/db"
+
+systemLog:
+    path: "/data/log/mongod.log"
+    destination: "file"
+
+net:
+    bindIp: "127.0.0.1,192.168.0.10"
+    ssl:
+        mode: "requireSSL"
+        PEMKeyFile: "/etc/ssl/ssl.pem"
+        CAFile: "/ect/ssl/SSLCA.pem"
+
+processManagement:
+    fork: true
+```
+
+## File Structure
+- `diagnostic.data` and `log` files assist support in diagnostics
+- do not modify files or folders in the MongoDB data directory (`dbPath`, defaults to /data/db)
+- defer to MongoDB support or documentation for instructions on interacting with these files
