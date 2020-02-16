@@ -204,3 +204,243 @@ The tools you get when downloading the MongoDB package:
     - defaults to using the test database and a collection named after the json file
 
 There are others: `find /usr/bin/ -name 'mongo*'`
+
+# Chapter 2: Replication
+## What is Replication
+MongoDB uses async statement-based replication because it is platform independent and provides more flexibility within replica set.
+
+Replication is the concept of maintaining mutliple copies of your data.
+Necessary because you can never assume that all servers/nodes will be available.
+In MongoDB, a group of nodes that each have copies of the data is called a __Replica Set__.
+By default, all data is handled by one of the nodes (primary), and the others (seconary) must sync with it asynchronously.
+
+During a failover (primary goes down), the nodes decide which one becomes the primary through an __Election__.
+
+Data replication takes 1 of 2 forms:
+- Binary Replication
+  - examines the exact bytes that changed in a data file
+  - the bytes are recorded in a binary log
+  - the seconary nodes receive a copy of the binary log and make the same exact changes
+  - easy on the secondary nodes
+  - assumes the OS is consistent across the entire Replica Set
+- Statement-Based Replication
+  - after a write is completed on the primary, the statement is stored in the Oplog
+  - secondaries then sync their Oplog with the primary, and run any new statements
+  - idempotent: the write commands are transformed before being placed in the Oplog so the statement can be applied numerous times
+
+Pros & Cons of the replication approaches:
+- Binary Replication
+  - less data
+  - faster
+- Statement-Based Replication
+  - not bound by OS, or any machine level dependency
+  - Oplog can grow
+
+## MongoDB Replica Set
+A Replica Set is a group of mongod(s) that share copies of the same info.
+In MongoDB, the asynchronous replication protocol could be:
+- pv1 - default
+  - based on RAFT protocol
+- pv0 - used by previous versions of MongoDB
+The asynchronous replication protocol affects how availability and durability are handled throughout the Replica Set.
+
+We will only be concerned with pv1.
+
+Oplog is a statement based log tracking all write operations.
+Every time a write applies to the primary, then it is recorded in an idempotent form in the Oplog.
+
+A Replica Set node can be configured as an Arbiter.
+It holds no data.
+Serves as a tie-breaker in an election.
+Cannot become primary.
+Avoid Arbiters, they can lead to consistency issues.
+
+You should strive to have an odd-number of nodes, although it is possible to have an even number.
+No matter the number, you must always have a majority of the nodes available.
+You can have up to 50 nodes.
+Only a max of 7 nodes are voting members; the voting members is where the new primary will come from during a failover or anything else triggering an election.
+
+Secondary nodes can also be:
+- hidden: provides specific read-only workloads
+  - still replicate data
+  - can still vote
+- delayed: allow resilience to application-level corruption (this node delays its replication process)
+
+## Setting up a Replica Set
+```yaml
+# because this example has all 3 nodes running on the same machine, 
+# all 3 nodes will use the same key file
+
+# node1.conf
+storage:
+  dbPath: /var/mongodb/db/node1
+net:
+  bindIp: 192.168.103.100,localhost
+  port: 27011
+security:
+  authorization: enabled
+  keyFile: /var/mongodb/pki/m103-keyfile
+systemLog:
+  destination: file
+  path: /var/mongodb/db/node1/mongod.log
+  logAppend: true
+processManagement:
+  fork: true
+replication:
+  replSetName: m103-example
+
+# node2.conf
+storage:
+  dbPath: /var/mongodb/db/node2
+net:
+  bindIp: 192.168.103.100,localhost
+  port: 27012
+security:
+  keyFile: /var/mongodb/pki/m103-keyfile
+systemLog:
+  destination: file
+  path: /var/mongodb/db/node2/mongod.log
+  logAppend: true
+processManagement:
+  fork: true
+replication:
+  replSetName: m103-example
+
+# node3.conf
+storage:
+  dbPath: /var/mongodb/db/node3
+net:
+  bindIp: 192.168.103.100,localhost
+  port: 27013
+security:
+  keyFile: /var/mongodb/pki/m103-keyfile
+systemLog:
+  destination: file
+  path: /var/mongodb/db/node3/mongod.log
+  logAppend: true
+processManagement:
+  fork: true
+replication:
+  replSetName: m103-example
+```
+
+To create a keyfile:
+```sh
+sudo mkdir -p /var/mongodb/pki
+sudo chown vagrant:vagrant -R /var/mongodb
+openssl rand -base64 741 > /var/mongodb/pki/m103-keyfile
+chmod 600 /var/mongodb/pki/m103-keyfile
+```
+
+To enable communication between the nodes:
+- connect to a node `mongo --port 27011`
+- `rs.initiate()`
+- connect the other nodes to the replica set
+  - if you have authenticate enabled, you must create a user for this
+  ```javascript
+    use admin
+    db.createUser({
+    user: "m103-admin",
+    pwd: "m103-pass",
+    roles: [
+        {role: "root", db: "admin"}
+    ]
+    })
+  ```
+  - log in as the user and connect to the replica set
+  ```sh
+    mongo --host "m103-example/192.168.103.100:27011" -u "m103-admin"
+    -p "m103-pass" --authenticationDatabase "admin"
+  ```
+  - add a node `rs.add("m103:27012")`
+    - m103 is the hostname, in this case our vagrant box
+
+One way to force an election is `rs.stepDown()`
+
+## Replication Configuration Document
+A BSON document, we manage using a JSON representation.
+Can be configured manually from the shell.
+It is shared across all the nodes.
+There are some mongo shell replication helper methods.
+
+Here are some of the configuration options:
+- _id: the name of the replica set
+  - Two ways to launch a mongod belonging to a replica set
+    - `mongod --replSet m103-example`
+    - `mongod -f /etc/mongodb.conf`
+- version: incremented every time the configuration changes
+- members: an array defining the topology and roles of the individual nodes in the replica set
+  - each element is a subdocument containing:
+    - _id: unique identifier of each element
+    - host: this is the hostname:port
+    - arbiterOnly
+    - hidden
+    - priority: [0,1000] higher priority => more likely to be primary
+      - 0 means the member can never be the primary
+    - slaveDelay: determines the replication delay interval in seconds
+      - setting this implies hidden is true and priority 0
+
+## Replication Commands
+`rs.status()`
+Reports health on replica set nodes.
+Uses data from heartbeats, which are sent between the nodes.
+Could be a few seconds out-of-date since it relies on heartbeats.
+
+`rs.isMaster()`
+Describes a node's role.
+
+`rs.serverStatus()['repl']`
+Section of the db.serverStatus() output.
+Similar to the output of `rs.isMaster()`.
+Also includes the `rbid` field, which is the number of rollbacks that have occurred on the node.
+
+`rs.printReplicationInfo()`
+Only returns oplog data relative to the current node.
+Contains timestamps for first and last oplog events.
+
+## Local DB
+All MongoDB instances start with two default databases, __admin__ and __local__.
+
+The `local` db starts with one collection: __startup_log__.
+If in a replica set, there are more collections:
+- most of the collections are maintained internally by the server, and are basically just configuration data : me, startup_log, system.replset, system.rollback.id, replset.election, replset.minvalid
+- oplog.rs: the central point of the replication mechanism
+  - keeps track of all statements being replicated
+  - it is a capped collection, there is a size limit
+    - `var stats = db.oplog.rs.stats()`, `stats.maxSize()`
+    - `rs.printReplicationInfo()` also shows the max size
+  - by default, the collection will take 5% of free disk
+
+The size of the oplog.rs can also be configured:
+```yaml
+replication:
+  oplogSizeMB: 5MB
+```
+Once the size is reached, the oldest operations are overwritten with newer operations.
+The time it takes to fully fill in the oplog is what determines the replication window.
+This value determines how long a replica set can afford a node to be down without requiring human intervention during recovery.
+
+Every node has its own oplog.
+Secondary nodes apply the data from the primary into their own oplogs.
+If a node fails, when it recovers it will attempt to find a common oplog entry in the other nodes so it knows how to recover.
+If it cannot find a common point, then the node cannot auto recover/sync with the rest.
+
+Nodes can have different sized oplogs.
+If the primary is larger, then it means a secondary can afford to be down longer.
+
+Therefore:
+- the replication window is proportional to the system load
+- one operation may result in many oplog.rs entries in order to create idempotent operations
+
+Any data written to local db will not be replicated, except for the things written to oplog.rs
+
+## Reconfiguring a Replica Set
+You can modify a replica set as it is running.
+You can add/remove nodes and change their configuration while the replica set is running.
+
+`rs.conf()` gives a complete configuration for the replica set.
+```sh
+cfg = rs.conf()
+cfg.members[3].votes = 0
+rs.reconfig(cfg) # reconfigure a running replica set
+```
