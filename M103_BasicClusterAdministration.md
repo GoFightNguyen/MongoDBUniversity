@@ -377,6 +377,7 @@ Here are some of the configuration options:
     - hidden
     - priority: [0,1000] higher priority => more likely to be primary
       - 0 means the member can never be the primary
+      - a node with priority 0 is considered passive
     - slaveDelay: determines the replication delay interval in seconds
       - setting this implies hidden is true and priority 0
 
@@ -444,3 +445,61 @@ cfg = rs.conf()
 cfg.members[3].votes = 0
 rs.reconfig(cfg) # reconfigure a running replica set
 ```
+
+## Reads and Writes on a Replica Set
+If connected to a secondary, in order to even read from it you must explicitly say so using `rs.slaveOk()`.
+Even doing this, you cannot write to a secondary node.
+
+If a replica set can no longer reach a majority, all remaining nodes will become secondaries, including the primary.
+During such time, you cannot do writes.
+
+## Failovers and Elections
+A rolling upgrade starts with the secondary nodes.
+
+`rs.stepDown()` is one way to have primary step down, which will force an election.
+
+## Write Concerns
+Additional write concern options:
+- wtimeout: <int>
+  - the time for the client to wait for the requested write concern before marking the operation as failed
+  - the write can still succeed if the timeout is exceeded
+- j: <true|false>
+  - requires the node to commit the write operation to the journal before returning an ack
+  - w:majority => j:true
+  - if j:false it means the node only has to store the data in memory before reporting success
+
+As an example, pretend you have a 3 node replica set.
+One node goes down.
+You execute db.new_data.insert({"m103": "very fun"}, {writeConcern: {w: 3, wtimeout: 1000}})
+- when a writeConcernError occurs, the document is still written to the healthy nodes
+  - a WriteResult object will indicate whether the writeConcern was successful or not, but it will not undo successful writes from any of the nodes
+- An unhealthy node will have the write applied when it is brought back online
+- If wtimeout is not specified, the write operation will be retried indefinitely
+  - so if the writeConcern is impossible, it may never return anything to the client
+
+## Read Concerns
+Read Concern levels:
+- local: return most recent data in the cluster
+  - basically, anything existing in the primary
+  - default for the primary
+- available (sharded clusters): same as local but applies to the secondary and for sharded clusters
+- majority: provides the strongest guarantee of data, but there's a chance you do not get the freshest/latest data in the cluster if it has yet to be replicated to the majority
+- linearizable: similar to majority but also means read-your-own-write functionality
+
+| | fast | latest | safe/durability guarantee |
+| --- | --- | --- | --- |
+| local | x | x | |
+| available | x | x | |
+| majority | x | | x |
+| linearizable | | x | x |
+
+## Read Preferences
+Allow you to route read operations to specific members of a replica set.
+Pretty much just a driver/client side setting.
+
+Read Preference modes:
+- primary (default)
+- primaryPreferred: if the primary is unavailable then a secondary can be used instead
+- secondary: only to secondary members
+- secondaryPreferred: if no secondaries are available then the primary can be used
+- nearest: to the node with the lowest network latency to the client
