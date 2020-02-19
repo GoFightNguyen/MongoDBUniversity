@@ -380,6 +380,7 @@ Here are some of the configuration options:
       - a node with priority 0 is considered passive
     - slaveDelay: determines the replication delay interval in seconds
       - setting this implies hidden is true and priority 0
+      - when set, the node can serve as a "hot" backup of data in case of accidental data loss on the other members
 
 ## Replication Commands
 `rs.status()`
@@ -503,3 +504,279 @@ Read Preference modes:
 - secondary: only to secondary members
 - secondaryPreferred: if no secondaries are available then the primary can be used
 - nearest: to the node with the lowest network latency to the client
+
+# Chapter 3 Sharding
+In MongoDB scaling is done horizontally, meaning we add more machines rather than making the individual machines better (scaling vertically).
+MongoDB then distributes the dataset among those machines.
+Data is distributed using __sharding__, which enables growing the dataset.
+The dataset is divided into pieces and distributed across the shards.
+
+To ensure high availability in a sharded cluster, each shard is deployed as a replica set.
+
+Since data is now divided among several shards, querying can become tricky.
+In between a sharded cluster and clients is a router process called __mongos__.
+It determines which shard should receive the query.
+There can be numerous mongos processes.
+The client connects to it.
+
+mongos uses metadata stored on config servers to know which shard to use.
+The metadata is what knows which data is stored on which shard.
+To ensure high availability, a replica set of the config servers are also created.
+
+## When to Shard
+Heuristics:
+- is it more expensive to scale up and is it possible?
+- operational impact on scalability (backup, restore, sync)
+- some workloads are better with sharding: single thread operations, geo distributed data
+
+## Sharding Architecture
+Each database is assigned a primary shard.
+Non-sharded collections for a specific database will remain on the primary shard.
+
+The role of primary shard is subject to change.
+Shard merges are performed by the mongos; when documents are fetched from multiple shards, mongos has to gather and organize those documents in a `shard_merge`.
+
+## Setting up a Sharded Cluster
+The bare minimum to start a sharded cluster: mongos, config server replica set, and at least one shard.
+
+mongos does not store data, so it does not need a `dbPath`.
+mongos inherits any users configured on the config servers.
+
+Build a config server:
+```yaml
+# csrs_1.conf
+sharding:
+  clusterRole: configsvr
+replication:
+  replSetName: m103-csrs
+security:
+  keyFile: /var/mongodb/pki/m103-keyfile
+net:
+  bindIp: localhost,192.168.103.100
+  port: 26001
+systemLog:
+  destination: file
+  path: /var/mongodb/db/csrs1.log
+  logAppend: true
+processManagement:
+  fork: true
+storage:
+  dbPath: /var/mongodb/db/csrs1
+
+# csrs_2.conf
+sharding:
+  clusterRole: configsvr
+replication:
+  replSetName: m103-csrs
+security:
+  keyFile: /var/mongodb/pki/m103-keyfile
+net:
+  bindIp: localhost,192.168.103.100
+  port: 26002
+systemLog:
+  destination: file
+  path: /var/mongodb/db/csrs2.log
+  logAppend: true
+processManagement:
+  fork: true
+storage:
+  dbPath: /var/mongodb/db/csrs2
+
+# csrs_3.conf
+sharding:
+  clusterRole: configsvr
+replication:
+  replSetName: m103-csrs
+security:
+  keyFile: /var/mongodb/pki/m103-keyfile
+net:
+  bindIp: localhost,192.168.103.100
+  port: 26003
+systemLog:
+  destination: file
+  path: /var/mongodb/db/csrs3.log
+  logAppend: true
+processManagement:
+  fork: true
+storage:
+  dbPath: /var/mongodb/db/csrs3
+```
+```sh
+mongod -f csrs-1.conf
+mongo --port 26001
+rs.initiate()
+
+# use the localhost exception to create user
+# will be inherited by mongos
+use admin
+db.createUser({user:"m103-admin",pwd:"m103-pass",roles:[{role:"root",db:"admin"}]})
+
+# authenticate as super-user
+db.auth("m103-admin", "m103-pass")
+
+# start the other two nodes.
+# add the other two nodes
+rs.add("192.168.103.100:port")
+```
+
+Now start mongos and point it at config server replica set.
+```yaml
+# mongos.conf
+sharding:
+  configDB: m103-csrs/192.168.103.100:26001,192.168.103.100:26002,192.168.103.100:26003
+security:
+  keyFile: /var/mongodb/pki/m103-keyfile
+net:
+  bindIp: localhost,192.168.103.100
+  port: 26000
+systemLog:
+  destination: file
+  path: /var/mongodb/db/mongos.log
+  logAppend: true
+processManagement:
+  fork: true
+```
+```sh
+mongos -f path/to/mongos.conf
+
+mongo --port 2600 -u "m103-admin" -p "m103-pass" --authenticationDatabase "admin"
+```
+
+`sh.status()` gives sharding data.
+
+Modify the replica set for the mongod nodes to include sharding by the following to their configs.
+This indicates the node _can_ be added to a shard.
+```yaml
+sharding:
+  clusterRole: shardsvr
+```
+
+Once applied, add the shard to mongos: `sh.addShard(replicaSetName/host:port)`.
+Adding any of the nodes will add the entire replica set.
+
+## Config DB
+Never write to this.
+It is maintained internally, and used internally, by MongoDB.
+
+Collections:
+- databases: the databases in the shard cluster
+- collections: info only on collections that have been sharded
+- shards: the shards in the cluster
+- chunks: each collection in this db (config) is returned as one document
+  - it includes an inclusive min and max, which define the chunk range of the sharded values
+- mongos: info about the mongos processes connected to the sharded cluster
+
+## Shard Keys
+The index field(s) used by MongoDB to partition data in a sharded collection and distribute it among the shards in your cluster.
+MongoDB uses the shard key to divide the documents into logical groupings called __chunks__.
+The grouping is defined by an inclusive lower bound and an exclusive upper bound.
+
+Shard key fields must exist in every document in the collection.
+A shard key also support read operations.
+
+- Shard key fields must be indexed
+  - indexes must exist before you can select the indexed fields for your shard key
+- The shard key value is mutable, even though the shard key itself is immutable
+- shard keys are permanent; you cannot unshard a sharded collection
+
+How to Shard:
+1. use `sh.enableSharding("<database>") to enable sharding for the specified database
+  - this enables the collections in the database for sharding, but does not actually shard them
+2. use `db.<<collection>.createIndex({"field":1})` (1 means ascending) to create the index for your shard key fields
+3. use `sh.shardCollection("<database>.<collection>", {shardkey})` to shard the collection
+
+## Picking a good Shard Key
+The goal is a shard key whose values provide good write distribution:
+- cardinality: the number of elements within a set of values
+  - the shard key should have high cardinality => many possible unique shard key values
+- frequency: how often a unique value occurs in the data
+  - the shard key should have low frequency => low repitition of a given unique shard key value
+- monotonic change: the possible shard key values for a new document changes at a steady and predictable rate (think timestamp)
+  - the shard key should be non-monotonically changing
+
+When querying and not using a shard key as your filter/match, then mongos has to ask every shard for data.
+This is a broadcast operation and is slow.
+Hopefully your shard key also supports your most frequent queries, which are hopefully targeted.
+
+## Hashed Shard Keys
+A shard key where the underlying index is hashed.
+With a hashed shard key, mongodb first hashes the value and then determines which shard it belongs to.
+This does not mean that mongodb stores the value as a hash; instead the data stored is untouched.
+It is only the underlying index that is hashed.
+This can be useful for ensuring a more even distribution across the shard cluster.
+
+When to use a hashed shard key:
+- if you are using a monotonically-changing shard key value
+  - useful because the hash value of similar/close values can be vastly differently
+
+Considerations:
+- queries on ranges of shard key values are more likely to be scatter-gather
+- cannot support geo-isolated read operations using zoned sharding
+- hashed index must be on a single non-array field
+- hashed indexes do not support fast sorting
+
+Sharding using a Hashed Shard Key:
+1. use `sh.enableSharding("<database>") to enable sharding for the specified database
+2. use `db.<collection>.createIndex({"<field>": "hashed"})` to create a hashed index for your shard key fields
+3. use `sh.shardCollection("<database>.<collection>", {<shardKeyField>: "hashed})` to shard the collection
+
+## Chunks
+Default chunk size is 64MB.
+1MB <= ChunkSize <= 1024MB.
+ChunkSize is configurable during runtime.
+`db.settings.save({_id: "chunksize", value: <value_in_MB>})`
+Something will need to occur after this to cause mongos to actually adjust the shards after changing the size.
+
+Jumbo chunks can occur if there is a high frequency of specific shard key value(s):
+- larger than the defined chunk size
+- cannot move jumbo chunks
+  - once marked as jumbo the balancer skips these chunks
+- in some cases these will not be able to be split
+
+## Balancing
+The MongoDB balancer identifies which shards have too many chunks.
+It then automatically moves chunks across shards in an attempt to achieve even data distribution.
+The Balancer process runs on the primary member of the config replica set.
+
+The balancer can migrate chunks in parallel.
+But a given shard cannot participate in more than one migration at a time.
+floor(n/2) where n is the number of shards gives the number of chunks that can be migrated in a balancer round.
+The balancer can split chunks if needed.
+
+Balancer management methods:
+- `sh.startBalancer(timeout,interval)`
+  - timeout is how to wait to start the balancer
+  - interval is how long the client waits before checking the balancer status again
+- `sh.stopBalancer(timeout,interval)`
+  - will only stop after the current balancing round completes
+- `sh.setBalancerState(boolean)`
+
+## Queries in a Sharded Cluster
+All queries go through the mongos in a sharded cluster.
+- mongos determines which shards must receive the query
+- mongos opens a cursor against each of the shards necessary
+  - each cursor executes the query predicate and returns the data
+- when mongos has all the results from the necessary shards, it merges the data together
+
+sort, limit, and skip in sharded clusters:
+- the mongos pushes the sort to each shard and merge-sorts the results
+- the mongos pushes the limit to each targeted shard, then re-applies the limit to the merged set of results
+- the mongos performs the skip against only the merged set of results
+- behavior can differ from this if using aggregation
+
+### Routed Queries vs Scatter Gather
+If using a compound index as the shard key (such as sku, type, and name), then you can specify each field up to the entire key and still get a targeted query.
+Targetable:
+- sku
+- sku, type
+- sku, type, name
+Scatter-gather since they don't include what preceeded them:
+- type
+- name
+
+To know what shards a query is going to:
+- `db.products.find({'sku': 1000000749}).explain()`
+  - assuming the shard key is sku
+- in the output
+  - winningPlan.stage says "SINGLE_SHARD"
+  - winningPlan.shards tells what shards executed the query
