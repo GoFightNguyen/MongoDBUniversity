@@ -84,3 +84,91 @@ An __index prefix__ is a _continuous_ subset of a compound index moving from lef
 For example, given a compound index on item, location, and stock, then the index prefixes are:
 - item
 - item, location
+A query can use an index scan for both filtering and sorting _if the query includes equality conditions_ on the prefix keys that precede the sort keys.
+If using the previous example, index scans would still occur if `find({item: 'x', location:'NY'}).sort({stock: 12})`.
+In other words, we can filter _and_ sort our queries by splitting up our index prefix between the query and sort predicates.
+
+We can also sort with an index if our sort predicate inverts our index keys or their prefixes (but everything included has to be inverted).
+
+## Multikey Indexes
+Indexing on an array is called a multikey index.
+It is called this because for each entry in the array, an index key is created.
+With multikey indexes we can index on more than scalar values, we can also use fields in a nested document (think an array of documents and using a field in those documents).
+
+For each index document, we can have at most 1 index field whose value is an array.
+
+Be careful that the arrays being indexed will not grow too large and thus, potentially causing the index not to fit in memory.
+
+Multikey indexes do not support covered queries.
+Covered queries prevent the reading of documents (?).
+
+## Partial Indexes
+This is when you index a subset of your documents.
+Might do this to:
+- lower storage requirements
+- reduce the performance cost of creating/maintaining indexes
+
+```sh
+db.restaurants.createIndex(
+    { 'address.city': 1, cuisine: 1},
+    {partialFilterExpression: { 'stars': {$gte: 3.5}}}
+)
+```
+
+Sparse indexes are a special case of partial indexes.
+`db.restaurants.createIndex({stars: 1}, {sparse: true})`.
+A sparse index only indexes documents where the field actually exists, instead of creating an index key with a null value.
+Could also do the previous like `db.restaurants.createIndex({stars: 1}, {partialFilterExpression: {'stars': {$exists: true}}})`.
+If taking the partial approach, you can also use fields you are not indexing on; for example `db.restaurants.createIndex({stars: 1}, {partialFilterExpression: {'cuisine': {$exists: true}}})`.
+
+For a query to use a partial index, the query must be guaranteed to match a subset of the documents specified by the filter expression.
+
+Restrictions:
+- cannot specify both the partialFilterExpression and the sparse options
+- _id indexes cannot be partial indexes
+- shard key indexes cannot be partial indexes.
+
+## Text Indexes
+Create these by specifying "text" instead of ascending/descending.
+`db.products.createIndex({productName: 'text'})`.
+This allows us to leverage MongoDB's full text search capabilities while avoiding collection scans.
+MongoDB creates text indexes by creating an index key for every unique word in the string.
+*** Unicode treats both spaces and hyphens as text delimiters".
+
+Text indexes are case-insensitive by default; each index key will be lowercase.
+Text queries _logically or_ each individual word.
+
+Beware if the strings are large:
+- more keys to examine
+- increased index size
+- increased time to build index
+- decreased write performance
+
+`db.textExample.find({$text:{$serach: "MongoDB best"}}, {score: {$meta: "textScore"}})`.
+$text assigns a score to each document based on its relevance to the query.
+We can now sort using `sort({score:{$meta:'textScore'}})` to get the documents that best match at the top of our results.
+
+## Collations
+Collations allow users to specify language-specific rules for string comparison.
+A collation is defined in MongoDB by the following options:
+- locale: string determining ICU supported locale
+- caseLevel: bool
+- caseFirst: string
+- strength: int
+- numericOrdering: bool
+- alternate: string
+- maxVariable: string
+- backwards: bool
+The presenter only discussed locale.
+
+Collations can be defined at multiple levels:
+- collection: collation is applied to all queries and indexes on the collection
+  - `db.createCollection("foreign_text", {collation: {locale: "pt"}})`
+- specific requests like queries and aggregations
+  - `db.foreign_text.find({predicate}).collation({locale:'it'})`
+- create indexes with a collation overriding either the default one or collection-level one
+  - `db.foreign_text.createIndex({name:1}, {collation: {locale: 'it'}})`
+  - to enabling using this index on a query, the query must specify the same collation
+
+Although collations provide correctness for specific locales, it provides marginal performance impact.
+Another benefit is supporting case-insensitive indexes (set `strenth` to 1).
