@@ -269,3 +269,72 @@ Benchmarking Anti-Patterns:
 - using mongoimport to test write operations
 - local laptop to run tests
 - using default MongoDB parameters
+
+# Chapter 4: CRUD Optimization
+Equality, sort, range: when building an index:
+- the beginning should start with equality conditions
+- followed by sort conditions
+- and finally range conditions
+When creating indexes, ensure the most selective fields are first.
+
+## Covered Queries
+Covered queries are a highly performant way to service the queries to the database.
+They are so fast because they are completely satisfied by index keys.
+This means 0 documents have to be examined.
+To do this, the query _must_ project to only those fields in the index.
+It will not work if your projection omits fields in the index or you include fields not in the index.
+
+In other words, an index covers a query only when both all fields in the query are a part of the index and all the fields returned are in the same index.
+This implies you need to filter out _id.
+
+You cannot cover a query if:
+- any of the indexed fields are arrays
+- any of the indexed fields are embedded documents
+- when run against a mongos if the index does not contain the shard key
+
+## Regex Performance
+Even if you index a field, if you then query against it using regex then MongoDB must evaluate every index key.
+You can help this by using something like `username:/^kirby/` because this will ignore index keys not starting with kirby.
+This optimization can only work if you are using a starts-with regex.
+
+## Insert Performance
+Three parts to a writeConcern:
+- w: number of nodes to write to before MongoDB returns ack
+- j: whether or not to wait for the write to go to the journal
+- wtimeout: how long, in ms, to wait for the write to timeout
+  - even if a timeout occurs, the write can still happen
+
+## Data Type Implications
+It is possible to have the same field with different data types across your documents.
+There are implications though:
+- query matching: you will only find matches where the data type is the same as in the predicate
+- sorting: MongoDB will first group by data type, and then sort within that type
+- index: the same type of ordering mentioned in sorting applies to indexing
+
+## Aggregation Performance
+There are two high-level categories of aggregation queries:
+- "Realtime"
+  - provide data for apps
+  - query perf is more important
+- Batch
+  - provide data for analytics
+  - query perf is less important
+We will be mostly focusing on realtime.
+
+With an aggregation query we form a pipeline of different aggregation operators.
+Some of the operators can use indexes while others cannot.
+Once a stage in the pipeline that is unable to use indexes, then all the following stages cannot use an index either.
+The query optimizer does attempt to move stages in order to utilize indexes.
+Transforming data in a pipeline stage also prevents using indexes in stages that follow.
+
+We can also use explain on aggregate pipelines `db.<collection>.aggregate([<operators>], {explain: true})`.
+
+`$match`, `$sort`, `$limit` can use indexes, so we want this at the front of the pipeline.
+Using limit right before sort is a top-k sorting algorithm.
+
+Memory Constraints:
+- results are subject to 16MB document limit
+  - use $limit and $project
+- 100 MB of RAM per stage, so use indexes
+  - if you must exceed this memory constraint, use `{allowDiskUse: true}`
+    - does not work with $graphLookup
