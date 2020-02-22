@@ -171,4 +171,101 @@ Collations can be defined at multiple levels:
   - to enabling using this index on a query, the query must specify the same collation
 
 Although collations provide correctness for specific locales, it provides marginal performance impact.
-Another benefit is supporting case-insensitive indexes (set `strenth` to 1).
+Another benefit is supporting case-insensitive indexes (set `strength` to 1).
+
+# Chapter 3: Index Operations
+## Building Indexes
+MongoDB allows creating index in the foreground or background.
+- Foreground indexes are fast to create, but will block all incoming operations to the db containing the collection.
+- Background indexes are slower to create, but do not block operations.
+  - `db.<collection>.createIndex({'cuisine':1, 'name':1, 'address.zipcode':1}, {'background':true})`
+  - check the status using `db.currentOp()` or
+  ```sh
+  db.currentOp(
+    {
+      $or: [
+        {op: "command", "query.createIndexes": {$exists: true}},
+        {op: "insert", ns:/\.system\.indexes\b/}
+      ]
+    }
+  )
+  ```
+
+## Query Plans
+A query plan is a series of stages feeding into one another.
+For a given query, there can be multiple query plans depending on the indexes.
+
+MongoDB chooses the query plan:
+- finds the candidate indexes
+- creates candidate plans based on the candidate indexes
+- MongoDB evaluates each candidate plan by executing it for a trial period
+  - MongoDB has an empirical query planner
+- The plan performing "best" is chosen
+
+MongoDB caches which plans should be used for a given query shape.
+This is so plans do not need to be generated and compared against each other every time a query is executed.
+
+## Understanding Explain
+Using explain on a query is the best way to understand what happened when it was executed: `db.people.find({<predicate>}).explain()`
+
+It can also tell you what would happen without the query being executed:
+```sh
+# create an explainable object
+# same as exp = db.people.explain("queryPlanner")
+exp = db.people.explain()
+
+exp.find({<predicate>})
+exp.find({<differentPredicate>})
+```
+
+When using `explain`, the default is "queryPlanner", which does not execute the query.
+If you pass it "executionStats" or "allPlansExecution", then query will execute.
+
+Explain can tell us:
+- is the query using the index we expected
+- is the query using an index to provide a sort
+- is the query using an index to provide the projection
+- how selective is the index
+- which part of the plan is the most expensive
+
+## Forcing Indexes with Hint
+`hint()` forces a query to use a specified index, thereby overriding MOngoDB's default index selection.
+`hint` can take the index shape as an argument: `db.<collection>.find({<predicate>}).hint({name: 1, zipcode: 1})`.
+`hint` can also take the index name: `db.<collection>.find({<predicate>}).hint('name_1_zipcode_1')`.
+
+Use this only if you know you must.
+
+## Resource Allocation for Indexes
+To help determine how much of an index(es) is in memory, you can start with ` db.<collection>.stats({indexDetails:true})` and from there drill down.
+
+*** Rule of thumb: always have enough memory to allocate indexes
+Some exceptions:
+- occassional reports such as for a BI tool
+  - to mitigate, we can run the queries against the secondary nodes and have the indexes for the report only on those nodes
+- right-end-side index increments (monotonically increasing)
+  - ex: counters, dates
+  - it is likely that an index will become unbalanced and grow only to the right
+  - if you only need to query on the most recent, then you only to support the right side of the B-Tree index in memory
+
+Indexes are not required to be entirely placed in RAM, however performance will suffer by constant disk access to retreive index information.
+
+## Basic Benchmarking
+Types of performance benchmarking:
+- low level
+  - file I/O performance
+  - scheduler performance
+  - memory allocation and transfer speed
+  - thread
+  - database server
+  - ...
+- distributed systems
+  - linearization
+  - serialization
+  - fault tolerance
+
+Benchmarking Anti-Patterns:
+- database swap replace (comparing MongoDB to a relational database without changing the schema)
+- using mongo shell for write and read requests
+- using mongoimport to test write operations
+- local laptop to run tests
+- using default MongoDB parameters
