@@ -338,3 +338,54 @@ Memory Constraints:
 - 100 MB of RAM per stage, so use indexes
   - if you must exceed this memory constraint, use `{allowDiskUse: true}`
     - does not work with $graphLookup
+
+# Chapter 5: Performance on Clusters
+In MongoDB, a distributed system can be a Replica Cluster/Set or a Shard Cluster.
+
+Before Sharding:
+- sharding is a horizontal scaling solution
+- have we reached the limits of our vertical scaling?
+- understand how your data grows and how it is accessed
+- sharding works by defining key based ranges - our shard key
+- important to get a good shard key
+
+There's a lot of info about reading/writing with shards, but I already noted that in M103.
+
+## Reading from Secondaries
+When reading data, there is always an associated read preference which defaults to primary `db.<collection>.find().readPref('primary')`.
+There is also. These are discussed in more detail in M103.:
+- primaryPreferred
+- secondary
+- secondaryPreferred
+- nearest
+
+Reading from a secondary is good for:
+- offloading work (like doing analytics)
+- local reads
+Reading from a secondary is bad for:
+- general
+- providing extra capacity for reads
+- reading from shards
+
+*** Special Note: As of MongoDB 3.6, because of changes to both logic in chunk migrations and read guarantees, it is now safe to read from secondaries in a shard as long as the appropriate read concern is set.
+
+## Replica Sets with Differing Indexes
+In general, do not have different indexes on secondaries than on primaries.
+Here are a few, specific examples where it might make sense:
+- specific analytics performed against secondary nodes
+- reporting on delayed consistency data
+- text search
+
+Secondary node considerations:
+- do NOT allow this secondary to become a primary
+  - priority: 0
+  - hidden
+  - delayed secondary
+
+## Aggregation Pipeline on a Sharded Cluster
+In general, shard merging happens on a random shard.
+But in certain cases, it will occur only on the primary shard:
+- $out
+- $facet
+- $lookup
+- $graphLookup
